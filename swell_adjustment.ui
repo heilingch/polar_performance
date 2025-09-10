@@ -1,0 +1,627 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>SwellAdjustmentMain</class>
+ <widget class="QMainWindow" name="SwellAdjustmentMain">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>647</width>
+    <height>619</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Polar Performance Swell Adjustment V1.4 (@ Christian Heiling)</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <widget class="QLabel" name="label">
+    <property name="geometry">
+     <rect>
+      <x>11</x>
+      <y>21</y>
+      <width>143</width>
+      <height>22</height>
+     </rect>
+    </property>
+    <property name="font">
+     <font>
+      <pointsize>12</pointsize>
+     </font>
+    </property>
+    <property name="text">
+     <string>Boat Configuration</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="label_2">
+    <property name="geometry">
+     <rect>
+      <x>11</x>
+      <y>68</y>
+      <width>81</width>
+      <height>17</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Boatname</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="label_3">
+    <property name="geometry">
+     <rect>
+      <x>11</x>
+      <y>99</y>
+      <width>81</width>
+      <height>17</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Boat model</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="label_4">
+    <property name="geometry">
+     <rect>
+      <x>11</x>
+      <y>130</y>
+      <width>161</width>
+      <height>17</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Lenght of waterline (LWL):</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="label_5">
+    <property name="geometry">
+     <rect>
+      <x>11</x>
+      <y>161</y>
+      <width>36</width>
+      <height>17</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Beam:</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="label_6">
+    <property name="geometry">
+     <rect>
+      <x>340</x>
+      <y>130</y>
+      <width>91</width>
+      <height>20</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Displacement:</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="label_7">
+    <property name="geometry">
+     <rect>
+      <x>342</x>
+      <y>161</y>
+      <width>32</width>
+      <height>17</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Draft:</string>
+    </property>
+   </widget>
+   <widget class="QLineEdit" name="boat_name">
+    <property name="geometry">
+     <rect>
+      <x>108</x>
+      <y>68</y>
+      <width>441</width>
+      <height>25</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string/>
+    </property>
+   </widget>
+   <widget class="QLineEdit" name="boat_model">
+    <property name="geometry">
+     <rect>
+      <x>108</x>
+      <y>99</y>
+      <width>441</width>
+      <height>25</height>
+     </rect>
+    </property>
+   </widget>
+   <widget class="QLineEdit" name="boat_lwl">
+    <property name="geometry">
+     <rect>
+      <x>191</x>
+      <y>130</y>
+      <width>81</width>
+      <height>25</height>
+     </rect>
+    </property>
+   </widget>
+   <widget class="QLineEdit" name="boat_beam">
+    <property name="geometry">
+     <rect>
+      <x>191</x>
+      <y>161</y>
+      <width>81</width>
+      <height>25</height>
+     </rect>
+    </property>
+   </widget>
+   <widget class="QLineEdit" name="boat_displacement">
+    <property name="geometry">
+     <rect>
+      <x>453</x>
+      <y>130</y>
+      <width>91</width>
+      <height>25</height>
+     </rect>
+    </property>
+   </widget>
+   <widget class="QLineEdit" name="boat_draft">
+    <property name="geometry">
+     <rect>
+      <x>453</x>
+      <y>161</y>
+      <width>91</width>
+      <height>25</height>
+     </rect>
+    </property>
+   </widget>
+   <widget class="QLabel" name="label_8">
+    <property name="geometry">
+     <rect>
+      <x>278</x>
+      <y>130</y>
+      <width>51</width>
+      <height>17</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>m</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="label_9">
+    <property name="geometry">
+     <rect>
+      <x>278</x>
+      <y>161</y>
+      <width>34</width>
+      <height>17</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>m</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="label_10">
+    <property name="geometry">
+     <rect>
+      <x>550</x>
+      <y>130</y>
+      <width>16</width>
+      <height>17</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>kg</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="label_12">
+    <property name="geometry">
+     <rect>
+      <x>11</x>
+      <y>210</y>
+      <width>122</width>
+      <height>22</height>
+     </rect>
+    </property>
+    <property name="font">
+     <font>
+      <pointsize>12</pointsize>
+     </font>
+    </property>
+    <property name="text">
+     <string>Swell conditions</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="label_17">
+    <property name="geometry">
+     <rect>
+      <x>10</x>
+      <y>440</y>
+      <width>59</width>
+      <height>17</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Log:</string>
+    </property>
+   </widget>
+   <widget class="QPlainTextEdit" name="event_log">
+    <property name="geometry">
+     <rect>
+      <x>10</x>
+      <y>470</y>
+      <width>591</width>
+      <height>91</height>
+     </rect>
+    </property>
+   </widget>
+   <widget class="QLabel" name="label_11">
+    <property name="geometry">
+     <rect>
+      <x>550</x>
+      <y>161</y>
+      <width>34</width>
+      <height>17</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>m</string>
+    </property>
+   </widget>
+   <widget class="QWidget" name="layoutWidget">
+    <property name="geometry">
+     <rect>
+      <x>12</x>
+      <y>247</y>
+      <width>296</width>
+      <height>72</height>
+     </rect>
+    </property>
+    <layout class="QGridLayout" name="gridLayout">
+     <item row="0" column="0">
+      <widget class="QLabel" name="label_13">
+       <property name="text">
+        <string>Significant wave height:</string>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="1">
+      <widget class="QLineEdit" name="swell_wavehight"/>
+     </item>
+     <item row="0" column="2">
+      <widget class="QLabel" name="label_14">
+       <property name="text">
+        <string>m</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="0">
+      <widget class="QLabel" name="label_15">
+       <property name="text">
+        <string>Wave period</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="1">
+      <widget class="QLineEdit" name="swell_period"/>
+     </item>
+     <item row="1" column="2">
+      <widget class="QLabel" name="label_16">
+       <property name="text">
+        <string>s</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </widget>
+   <widget class="QWidget" name="layoutWidget">
+    <property name="geometry">
+     <rect>
+      <x>13</x>
+      <y>330</y>
+      <width>246</width>
+      <height>72</height>
+     </rect>
+    </property>
+    <layout class="QFormLayout" name="formLayout">
+     <item row="0" column="0">
+      <widget class="QLabel" name="label_18">
+       <property name="text">
+        <string>Custom. Deg. Beating:</string>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="1">
+      <widget class="QLineEdit" name="custom_deg_beat">
+       <property name="text">
+        <string>1.0</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="0">
+      <widget class="QLabel" name="label_19">
+       <property name="text">
+        <string>Custom. Deg. Running:</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="1">
+      <widget class="QLineEdit" name="custom_deg_run">
+       <property name="text">
+        <string>1.0</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </widget>
+   <widget class="QLabel" name="label_23">
+    <property name="geometry">
+     <rect>
+      <x>334</x>
+      <y>284</y>
+      <width>29</width>
+      <height>17</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>TWA:</string>
+    </property>
+   </widget>
+   <widget class="QLineEdit" name="wind_twa">
+    <property name="geometry">
+     <rect>
+      <x>391</x>
+      <y>284</y>
+      <width>108</width>
+      <height>25</height>
+     </rect>
+    </property>
+   </widget>
+   <widget class="QLabel" name="label_25">
+    <property name="geometry">
+     <rect>
+      <x>505</x>
+      <y>284</y>
+      <width>16</width>
+      <height>17</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>°</string>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="calc_degradation">
+    <property name="geometry">
+     <rect>
+      <x>334</x>
+      <y>315</y>
+      <width>201</width>
+      <height>25</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Calculate Degradation Factors</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="label_22">
+    <property name="geometry">
+     <rect>
+      <x>334</x>
+      <y>253</y>
+      <width>28</width>
+      <height>17</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>TWS:</string>
+    </property>
+   </widget>
+   <widget class="QLineEdit" name="wind_tws">
+    <property name="geometry">
+     <rect>
+      <x>391</x>
+      <y>253</y>
+      <width>108</width>
+      <height>25</height>
+     </rect>
+    </property>
+   </widget>
+   <widget class="QLabel" name="label_24">
+    <property name="geometry">
+     <rect>
+      <x>505</x>
+      <y>253</y>
+      <width>16</width>
+      <height>17</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>kn</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="K_reach">
+    <property name="geometry">
+     <rect>
+      <x>490</x>
+      <y>381</y>
+      <width>41</width>
+      <height>18</height>
+     </rect>
+    </property>
+    <property name="font">
+     <font>
+      <pointsize>10</pointsize>
+      <bold>true</bold>
+     </font>
+    </property>
+    <property name="text">
+     <string>xx</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="label_27">
+    <property name="geometry">
+     <rect>
+      <x>355</x>
+      <y>429</y>
+      <width>111</width>
+      <height>17</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Est. Degradation:</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="K_run">
+    <property name="geometry">
+     <rect>
+      <x>490</x>
+      <y>405</y>
+      <width>41</width>
+      <height>18</height>
+     </rect>
+    </property>
+    <property name="font">
+     <font>
+      <pointsize>10</pointsize>
+      <bold>true</bold>
+     </font>
+    </property>
+    <property name="text">
+     <string>xx</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="label_20">
+    <property name="geometry">
+     <rect>
+      <x>355</x>
+      <y>405</y>
+      <width>121</width>
+      <height>17</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Est. Deg. Running:</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="label_26">
+    <property name="geometry">
+     <rect>
+      <x>355</x>
+      <y>381</y>
+      <width>121</width>
+      <height>17</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Est. Deg. Reaching:</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="K_deg">
+    <property name="geometry">
+     <rect>
+      <x>490</x>
+      <y>429</y>
+      <width>41</width>
+      <height>26</height>
+     </rect>
+    </property>
+    <property name="font">
+     <font>
+      <pointsize>14</pointsize>
+      <bold>false</bold>
+     </font>
+    </property>
+    <property name="text">
+     <string>xx</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="K_beat">
+    <property name="geometry">
+     <rect>
+      <x>490</x>
+      <y>357</y>
+      <width>41</width>
+      <height>18</height>
+     </rect>
+    </property>
+    <property name="font">
+     <font>
+      <pointsize>10</pointsize>
+      <bold>true</bold>
+     </font>
+    </property>
+    <property name="text">
+     <string>xx</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="label_21">
+    <property name="geometry">
+     <rect>
+      <x>355</x>
+      <y>357</y>
+      <width>111</width>
+      <height>17</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Est. Deg. Beating:</string>
+    </property>
+   </widget>
+  </widget>
+  <widget class="QMenuBar" name="menubar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>647</width>
+     <height>30</height>
+    </rect>
+   </property>
+   <widget class="QMenu" name="menuFile">
+    <property name="title">
+     <string>File</string>
+    </property>
+    <addaction name="separator"/>
+    <addaction name="actionOpen_Polar_File"/>
+    <addaction name="actionSave_Polar_File_as"/>
+    <addaction name="actionClose"/>
+   </widget>
+   <widget class="QMenu" name="menuBoat_Config">
+    <property name="title">
+     <string>Boat Config.</string>
+    </property>
+    <addaction name="separator"/>
+    <addaction name="actionLoad_Boat_Configuration"/>
+    <addaction name="actionSave_Boad_Configuration"/>
+   </widget>
+   <addaction name="menuFile"/>
+   <addaction name="menuBoat_Config"/>
+  </widget>
+  <widget class="QStatusBar" name="statusbar"/>
+  <action name="actionOpen_Polar_File">
+   <property name="text">
+    <string>Open Polar File</string>
+   </property>
+  </action>
+  <action name="actionSave_Polar_File_as">
+   <property name="text">
+    <string>Save Adjusted Polar File as</string>
+   </property>
+  </action>
+  <action name="actionClose">
+   <property name="text">
+    <string>Quit</string>
+   </property>
+  </action>
+  <action name="actionLoad_Boat_Configuration">
+   <property name="text">
+    <string>Load Boat Configuration</string>
+   </property>
+  </action>
+  <action name="actionSave_Boad_Configuration">
+   <property name="text">
+    <string>Save Boat Configuration</string>
+   </property>
+  </action>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
