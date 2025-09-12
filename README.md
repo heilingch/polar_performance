@@ -5,10 +5,10 @@
 
 A PyQt6 desktop application for sailors and naval architects to analyze, visualize, and utilize yacht polar performance data. The tool can calculate target speeds, determine optimal sailing angles (VMG), and assess real-time performance against theoretical data using live data from NMEA sources.
 
-![Polar Performance Analyzer Main Window](https://raw.githubusercontent.com/ChristianHeiling/polar_performance/main/polar_performance_mainwindow.png)
+![Polar Performance Analyzer Main Window](https://github.com/heilingch/polar_performance/blob/main/polar_performance_mainwindow.png)
 
 
-![Swell Adjustment Tool](https://raw.githubusercontent.com/ChristianHeiling/polar_performance/main/swell_adjustment_tool.png)
+![Swell Adjustment Tool](https://github.com/heilingch/polar_performance/blob/main/swell_adjustment_tool.png)
 
 ## Key Features
 
