@@ -84,7 +84,7 @@ class MainWindow(QMainWindow):
             print(f"**Warning: Icon not found at {icon_path}")
 
         
-        self.setWindowTitle("Polar Performance Analyzer (@ Christian Heiling) V5.0") 
+        self.setWindowTitle("Polar Performance Analyzer (@ Christian Heiling) V6.0") 
         QApplication.setApplicationName("PolarPerformanceAnalyzer")
         self.polar_processor = PolarProcessor()
         self.ref_polar_processor = PolarProcessor()  
