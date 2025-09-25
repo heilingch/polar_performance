@@ -1,0 +1,65 @@
+{
+  "jib_full": {
+    "type": "head_sail",
+    "min_awa": 30,
+    "max_awa": 165,
+    "min_aws": 1,
+    "max_aws": 17
+  },
+  "jib_reef_1": {
+    "type": "head_sail",
+    "min_awa": 30,
+    "max_awa": 165,
+    "min_aws": 15,
+    "max_aws": 22
+  },
+  "jib_reef_2": {
+    "type": "head_sail",
+    "min_awa": 30,
+    "max_awa": 165,
+    "min_aws": 22,
+    "max_aws": 27
+  },
+  "jib_reef_3": {
+    "type": "head_sail",
+    "min_awa": 30,
+    "max_awa": 165,
+    "min_aws": 27,
+    "max_aws": 45
+  },
+  "main_full": {
+    "type": "main_sail",
+    "min_awa": 25,
+    "max_awa": 180,
+    "min_aws": 1,
+    "max_aws": 18
+  },
+  "main_reef_1": {
+    "type": "main_sail",
+    "min_awa": 25,
+    "max_awa": 180,
+    "min_aws": 18,
+    "max_aws": 22
+  },
+  "main_reef_2": {
+    "type": "main_sail",
+    "min_awa": 25,
+    "max_awa": 180,
+    "min_aws": 22,
+    "max_aws": 30
+  },
+  "main_reef_3": {
+    "type": "main_sail",
+    "min_awa": 25,
+    "max_awa": 180,
+    "min_aws": 30,
+    "max_aws": 45
+  },
+  "spinnaker": {
+    "type": "head_sail",
+    "min_awa": 120,
+    "max_awa": 180,
+    "min_aws": 4,
+    "max_aws": 12
+  }
+}

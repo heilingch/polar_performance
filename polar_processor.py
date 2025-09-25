@@ -169,19 +169,6 @@ class PolarProcessor:
         else:
             return False, 0.0
         
-        # Calculate performance percentage
-        performance = (boat_speed / target_speed) * 100
-        return True, performance
-
-
-
-    def calculate_performance(self, twa, tws, speed):
-        # Calculate percentage of polar performance
-        pass
-
-    def find_optimal_angles(self, tws):
-        # Find best angles for beating and running
-        pass
 
     def generate_polar_plot_data(self, tws):
         """
@@ -249,6 +236,7 @@ class PolarProcessor:
             
         Returns:
             float: Apparent Wind Angle in degrees
+            float: Apparent Wind Speed in knots
         """
 
         # Convert angles to radians for numpy
