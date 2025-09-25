@@ -22,6 +22,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 from polar_processor import PolarProcessor
 import math # To handle potential math errors
+import sys
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                             QHBoxLayout, QLabel, QLineEdit, QPushButton, 
+                             QFileDialog, QMessageBox, QTextEdit)
+from PyQt6.QtGui import QAction
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 
 try:
     from scipy.ndimage import center_of_mass
@@ -172,7 +178,7 @@ class CrossoverChartGenerator:
     # This function will take the generated data grid and use matplotlib
     # to create and display the visual chart.
     
-    def plot_chart(self, sail_combo_grids, tws_range, twa_range, style='twa_on_y', current_tws=None, current_twa=None):
+    def plot_chart(self, sail_combo_grids, tws_range, twa_range, style='twa_on_y', current_tws=None, current_twa=None, canvas=None):
         """
         Generates and displays the crossover chart using layered contours.
 
@@ -184,9 +190,17 @@ class CrossoverChartGenerator:
             style (str): The style of the chart ('twa_on_y' or 'tws_on_y').
             current_tws (float, optional): The current TWS to plot as a marker.
             current_twa (float, optional): The current TWA to plot as a marker.
+            canvas (FigureCanvasQTAgg, optional): The canvas to draw the plot on.
         """
         # 4a: Set up the plot figure and axes.
-        fig, ax = plt.subplots(figsize=(14, 8))
+        if canvas:
+            fig = canvas.figure
+            fig.clear()
+            ax = fig.add_subplot(111)
+        else:
+            fig, ax = plt.subplots(figsize=(14, 8))
+        
+        ax.grid(True, linestyle=':', linewidth=0.5)
         TWS, TWA = np.meshgrid(tws_range, twa_range)
 
         # 4b: Define a list of colors for the sails and prepare for the legend.
@@ -199,7 +213,7 @@ class CrossoverChartGenerator:
         if SCIPY_AVAILABLE:
             # --- NEW: Logic for inline labels ---
             # This block now runs exclusively if scipy is found.
-            ax.set_title('Sail Crossover Chart (Inline Labels)')
+            ax.set_title('Sail Crossover Chart')
 
             # 4c: Plot each sail combination as a semi-transparent layer.
             # The arguments to contourf are swapped based on the desired style.
@@ -233,16 +247,15 @@ class CrossoverChartGenerator:
                     ax.plot(current_twa, current_tws, marker='o', color='darkgreen', markersize=10, zorder=10)
                     ax.set_ylabel('True Wind Speed (knots)')
                     ax.set_xlabel('True Wind Angle (degrees)')
-                # Add a proxy artist for the 'Current Condition' marker to the legend
-                legend_artists.append(plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='darkgreen', markersize=10))
-                legend_labels.append('Current Condition')
+                ax.set_xlim(left=0)
+                ax.set_ylim(bottom=0)
 
             # 4f: Add the legend to the plot.
             # Place the legend outside the main plot area to avoid obscuring data.
-            ax.legend(legend_artists, legend_labels, title="Sail Combinations", bbox_to_anchor=(1.05, 1), loc='upper left')
+            # ax.legend(legend_artists, legend_labels, title="Sail Combinations", bbox_to_anchor=(1.05, 1), loc='upper left')
 
-            # 4g: Adjust layout to prevent the legend from being cut off.
-            fig.tight_layout(rect=[0, 0, 0.85, 1])
+            # 4g: Adjust layout to prevent labels from being cut off.
+            fig.subplots_adjust(left=0.15, right=0.95, top=0.95, bottom=0.1)
 
         else:
             # --- FALLBACK: Logic for legend-based plotting ---
@@ -278,51 +291,181 @@ class CrossoverChartGenerator:
                     ax.plot(current_twa, current_tws, marker='o', color='darkgreen', markersize=10, zorder=10)
                     ax.set_ylabel('True Wind Speed (knots)')
                     ax.set_xlabel('True Wind Angle (degrees)')
-                # Add a proxy artist for the 'Current Condition' marker to the legend
-                legend_artists.append(plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='darkgreen', markersize=10))
-                legend_labels.append('Current Condition')
+                ax.set_xlim(left=0)
+                ax.set_ylim(bottom=0)
 
             # 4f: Add the legend to the plot.
             # Place the legend outside the main plot area to avoid obscuring data.
-            ax.legend(legend_artists, legend_labels, title="Sail Combinations", bbox_to_anchor=(1.05, 1), loc='upper left')
+            #ax.legend(legend_artists, legend_labels, title="Sail Combinations", bbox_to_anchor=(1.05, 1), loc='upper left')
 
-            # 4g: Adjust layout to prevent the legend from being cut off.
-            fig.tight_layout(rect=[0, 0, 0.85, 1])
+            # 4g: Adjust layout to prevent labels from being cut off.
+            fig.subplots_adjust(left=0.15, right=0.95, top=0.95, bottom=0.1)
 
         # 4h: Display the plot.
-        plt.show()
+        if canvas:
+            canvas.draw()
+        else:
+            plt.show()
 
+class CrossoverChartGUI(QMainWindow):
+    def __init__(self, polar_file, sail_inventory_file):
+        super().__init__()
+        self.polar_file = polar_file
+        self.sail_inventory_file = sail_inventory_file
+        self.generator = CrossoverChartGenerator(self.polar_file, self.sail_inventory_file)
+        
+        self.setWindowTitle("Sail Crossover Chart Generator")
+        self.setGeometry(100, 100, 1200, 800)
+        
+        self._create_menu_bar()
+        
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        main_layout = QHBoxLayout(central_widget)
+        
+        # Left panel for controls
+        control_layout = QVBoxLayout()
+        
+        # TWS input
+        control_layout.addWidget(QLabel("True Wind Speed (TWS):"))
+        self.tws_input = QLineEdit("10")
+        control_layout.addWidget(self.tws_input)
+        
+        # TWA input
+        control_layout.addWidget(QLabel("True Wind Angle (TWA):"))
+        self.twa_input = QLineEdit("90")
+        control_layout.addWidget(self.twa_input)
+        
+        # Submit button
+        self.submit_button = QPushButton("Generate Chart & Suggest Sail")
+        control_layout.addWidget(self.submit_button)
+        
+        # Output text box
+        control_layout.addWidget(QLabel("Optimum Sail:"))
+        self.output_text = QTextEdit()
+        self.output_text.setReadOnly(True)
+        control_layout.addWidget(self.output_text)
+        
+        control_layout.addStretch()
+        
+        # Right panel for the chart
+        self.canvas = FigureCanvas(plt.figure(figsize=(14, 8)))
+        
+        main_layout.addLayout(control_layout, 1)
+        main_layout.addWidget(self.canvas, 3)
+        
+        self.submit_button.clicked.connect(self.generate_chart_and_suggestion)
+        self.generate_chart_and_suggestion()
 
-# --- Step 5: Main execution block ---
-# This is where we will run the generator.
+    def _create_menu_bar(self):
+        menu_bar = self.menuBar()
+        file_menu = menu_bar.addMenu("File")
+        
+        load_sail_action = QAction("Load Sail Inventory", self)
+        load_sail_action.triggered.connect(self.load_sail_inventory)
+        file_menu.addAction(load_sail_action)
 
+    def load_sail_inventory(self):
+        file_name, _ = QFileDialog.getOpenFileName(self, "Load Sail Inventory", "", "JSON Files (*.json)")
+        if file_name:
+            self.sail_inventory_file = file_name
+            try:
+                self.generator = CrossoverChartGenerator(self.polar_file, self.sail_inventory_file)
+                self.generate_chart_and_suggestion()
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to load sail inventory: {e}")
+
+    def generate_chart_and_suggestion(self):
+        try:
+            current_tws = float(self.tws_input.text())
+            current_twa = float(self.twa_input.text())
+        except ValueError:
+            QMessageBox.warning(self, "Input Error", "TWS and TWA must be numbers.")
+            return
+
+        tws_range = np.arange(4, 40, 0.1)
+        twa_range = np.arange(30, 181, 1)
+        
+        sail_combo_grids = self.generator.generate_crossover_data(tws_range, twa_range)
+        
+        self.generator.plot_chart(sail_combo_grids, tws_range, twa_range, 
+                                  style='tws_on_y',
+                                  current_tws=current_tws, current_twa=current_twa, 
+                                  canvas=self.canvas)
+        
+        # Find optimum sail
+        optimum_sail = "No suitable sail found"
+        for sail_name, grid in sail_combo_grids.items():
+            twa_idx = np.abs(twa_range - current_twa).argmin()
+            tws_idx = np.abs(tws_range - current_tws).argmin()
+            if grid[twa_idx, tws_idx]:
+                optimum_sail = sail_name
+                break
+        self.output_text.setText(optimum_sail)
+        
+        self.submit_button.clicked.connect(self.generate_chart_and_suggestion)
+        self.generate_chart_and_suggestion()
+
+    def _create_menu_bar(self):
+        menu_bar = self.menuBar()
+        file_menu = menu_bar.addMenu("File")
+        
+        load_sail_action = QAction("Load Sail Inventory", self)
+        load_sail_action.triggered.connect(self.load_sail_inventory)
+        file_menu.addAction(load_sail_action)
+
+    def load_sail_inventory(self):
+        file_name, _ = QFileDialog.getOpenFileName(self, "Load Sail Inventory", "", "JSON Files (*.json)")
+        if file_name:
+            self.sail_inventory_file = file_name
+            try:
+                self.generator = CrossoverChartGenerator(self.polar_file, self.sail_inventory_file)
+                self.generate_chart_and_suggestion()
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to load sail inventory: {e}")
+
+    def generate_chart_and_suggestion(self):
+        try:
+            current_tws = float(self.tws_input.text())
+            current_twa = float(self.twa_input.text())
+        except ValueError:
+            QMessageBox.warning(self, "Input Error", "TWS and TWA must be numbers.")
+            return
+
+        tws_range = np.arange(4, 40, 0.5)
+        twa_range = np.arange(30, 181, 1)
+        
+        sail_combo_grids = self.generator.generate_crossover_data(tws_range, twa_range)
+        
+        self.generator.plot_chart(sail_combo_grids, tws_range, twa_range, 
+                                  style='tws_on_y',
+                                  current_tws=current_tws, current_twa=current_twa, 
+                                  canvas=self.canvas)
+        
+        # Find optimum sail
+        optimum_sail = "No suitable sail found"
+        for sail_name, grid in sail_combo_grids.items():
+            twa_idx = np.abs(twa_range - current_twa).argmin()
+            tws_idx = np.abs(tws_range - current_tws).argmin()
+            if grid[twa_idx, tws_idx]:
+                optimum_sail = sail_name
+                break
+        self.output_text.setText(optimum_sail)
+
+# --- Main execution block ---
 if __name__ == '__main__':
-    # 5a: Define file paths, chart ranges, and test data for current conditions.
+    app = QApplication(sys.argv)
+    
+    # Define the initial file paths. These can be changed via the GUI.
     POLAR_FILE = 'test_polars/elan-impression-444.pol'
     SAIL_INVENTORY_FILE = 'ariadne_sails.json'
     
-    # Define the grid resolution.
-    TWS_RANGE = np.arange(0, 40.5, 0.5)
-    TWA_RANGE = np.arange(0, 181, 1)
-
-    # Define test data for the current wind condition marker.
-    CURRENT_TWS = 15
-    CURRENT_TWA = 50
-    
     try:
-        # 5b: Create an instance of the generator.
-        generator = CrossoverChartGenerator(POLAR_FILE, SAIL_INVENTORY_FILE)
-
-        # 5c: Run the data generation process.
-        print("Generating crossover data... This may take a moment.")
-        crossover_grid = generator.generate_crossover_data(TWS_RANGE, TWA_RANGE)
-
-        # 5d: Plot the resulting charts in both styles, including the current condition marker.
-        print("Plotting chart (Style 1: TWA on Y-axis)...")
-        generator.plot_chart(crossover_grid, TWS_RANGE, TWA_RANGE, style='twa_on_y', current_tws=CURRENT_TWS, current_twa=CURRENT_TWA)
-
-        print("Plotting chart (Style 2: TWS on Y-axis)...")
-        generator.plot_chart(crossover_grid, TWS_RANGE, TWA_RANGE, style='tws_on_y', current_tws=CURRENT_TWS, current_twa=CURRENT_TWA)
-
+        window = CrossoverChartGUI(POLAR_FILE, SAIL_INVENTORY_FILE)
+        window.show()
+        sys.exit(app.exec())
     except Exception as e:
-        print(f"An error occurred: {e}")
+        # Basic error handling for GUI startup
+        from PyQt6.QtWidgets import QMessageBox
+        QMessageBox.critical(None, "Application Error", f"An error occurred: {e}")
+        sys.exit(1)

@@ -252,7 +252,7 @@ class PolarProcessor:
         baw = np.arctan((tws*np.sin(btw))/(tws*np.cos(btw) + boat_speed))
         awa = np.degrees(baw)
         if awa < 0:
-            print("   **DEBUG: Applied wind angle is negative, adding 180 degrees")
+            #print("   **DEBUG: Applied wind angle is negative, adding 180 degrees")
             awa = awa + 180
         
         return {'awa': round(awa,2), 'aws': round(vaw,2)}
