@@ -5,6 +5,33 @@ import math
 import re
 
 class UDPNetworkReader:
+    @staticmethod
+    def apparent_to_true_wind(awa_deg, aws_knots, sog_knots):
+        """
+        Convert apparent wind angle/speed and boat speed to true wind angle/speed.
+        Uses the reverse of the tw_2_aw formula from PolarProcessor.
+        Returns (twa_deg, tws_knots)
+        """
+        import numpy as np
+        # Convert to radians
+        awa_rad = np.radians(awa_deg)
+        aws = aws_knots
+        sog = sog_knots
+        # Law of cosines for wind triangle
+        # tws^2 = aws^2 + sog^2 - 2*aws*sog*cos(awa)
+        # Solve for tws
+        tws = np.sqrt(aws**2 + sog**2 - 2*aws*sog*np.cos(awa_rad))
+        # Law of sines for angle
+        # sin(TWA)/sog = sin(AWA)/tws
+        # => TWA = arcsin(sog/tws * sin(awa))
+        if tws == 0:
+            twa = 0.0
+        else:
+            sin_twa = sog / tws * np.sin(awa_rad)
+            # Clamp to [-1, 1] to avoid domain errors
+            sin_twa = np.clip(sin_twa, -1.0, 1.0)
+            twa = np.degrees(np.arcsin(sin_twa))
+        return twa, tws
     """
     Class for reading navigation data from OpenCPN via a network connection (UDP or TCP).
     It parses NMEA0183 sentences to extract Speed Over Ground (SOG), position (Lat/Lon),
@@ -44,6 +71,8 @@ class UDPNetworkReader:
             'tws_knots': math.nan,  # True Wind Speed
             'twd_degrees': math.nan,# True Wind Direction
             'twa_degrees': math.nan, # True Wind Angle
+            'awa_degrees': math.nan, # Apparent Wind Angle
+            'aws_knots': math.nan,   # Apparent Wind Speed
             'last_update_time': 0.0
         }
         
@@ -194,17 +223,11 @@ class UDPNetworkReader:
                     # $WIMWV,angle,R/T,speed,unit,A*CS
                     # R = Relative/Apparent, T = True
                     # Angle is ALWAYS relative to bow (0-359).
-                    # --- MODIFICATION START ---
-                    # Date: 2025-05-24
-                    # Reason: Correctly parse WIMWV. If 'T', it's TWA/TWS. If 'R', it's AWA/AWS.
-                    #         Crucially, DO NOT treat the angle as TWD.
-                    
                     if len(fields) > 4 and fields[1] and fields[2] and fields[3] and fields[4]:
                         angle_str = fields[1]
                         reference = fields[2]
                         speed_str = fields[3]
                         speed_units = fields[4]
-                        
                         speed_val = float(speed_str)
                         current_speed_knots = math.nan
                         if speed_units == 'N':
@@ -216,21 +239,26 @@ class UDPNetworkReader:
 
                         if reference == 'T' and not math.isnan(current_speed_knots):
                             # This is a TRUE wind sentence, providing TWA and TWS.
+                            print(f"[UDP DEBUG] Received TRUE wind: TWA={angle_str}°, TWS={current_speed_knots:.2f}kn (from MWV,T)")
                             self._latest_data['tws_knots'] = current_speed_knots
-                            
                             twa_0_359 = float(angle_str)
                             # Normalize TWA from 0-359 to -180 to +180
                             twa_normalized = twa_0_359
                             if twa_normalized > 180:
                                 twa_normalized -= 360
-                            
                             self._latest_data['twa_degrees'] = twa_normalized
                             self._twa_mwv_timestamp = current_time # Mark that we got TWA directly
                             updated_any = True
-                        
-                        # elif reference == 'R': # Apparent wind (Optional: Add AWA/AWS storage if needed)
-                        #     pass
-                    # --- MODIFICATION END ---
+                        elif reference == 'R' and not math.isnan(current_speed_knots):
+                            # Apparent wind: store AWA/AWS for later conversion
+                            print(f"[UDP DEBUG] Received APPARENT wind: AWA={angle_str}°, AWS={current_speed_knots:.2f}kn (from MWV,R)")
+                            awa_0_359 = float(angle_str)
+                            awa_normalized = awa_0_359
+                            if awa_normalized > 180:
+                                awa_normalized -= 360
+                            self._latest_data['awa_degrees'] = awa_normalized
+                            self._latest_data['aws_knots'] = current_speed_knots
+                            updated_any = True
 
 
                 # --- MODIFICATION START ---
@@ -242,17 +270,38 @@ class UDPNetworkReader:
                 can_calculate = not math.isnan(self._latest_data['twd_degrees']) and \
                                 not math.isnan(self._latest_data['cog_degrees'])
 
+                # 1. If TWD/COG available and no recent WIMWV,T, calculate TWA from TWD/COG
                 if can_calculate and not is_mwv_twa_valid:
-                    # If WIMWV,T is stale or never received, calculate TWA from TWD/COG
                     twa = self._latest_data['twd_degrees'] - self._latest_data['cog_degrees']
-                    # Normalize to -180 to +180
                     while twa > 180: twa -= 360
                     while twa <= -180: twa += 360
                     self._latest_data['twa_degrees'] = twa
                     updated_any = True
-                elif not can_calculate and not is_mwv_twa_valid:
-                     # If we can't calculate and WIMWV,T is stale, TWA is unknown.
-                     self._latest_data['twa_degrees'] = math.nan
+
+                # 2. If no true wind but AWA/AWS, SOG, and COG are available, convert apparent to true wind
+                elif not is_mwv_twa_valid:
+                    awa = self._latest_data.get('awa_degrees', math.nan)
+                    aws = self._latest_data.get('aws_knots', math.nan)
+                    sog = self._latest_data.get('sog_knots', math.nan)
+                    cog = self._latest_data.get('cog_degrees', math.nan)
+                    # Only convert if all required values are present
+                    if not math.isnan(awa) and not math.isnan(aws) and not math.isnan(sog) and not math.isnan(cog):
+                        # Use existing conversion function (assumed to be available in this class or imported)
+                        # The function signature should be:
+                        #   def apparent_to_true_wind(awa_deg, aws_knots, sog_knots):
+                        # Returns (twa_deg, tws_knots)
+                        try:
+                            twa_deg, tws_knots = self.apparent_to_true_wind(awa, aws, sog)
+                            self._latest_data['twa_degrees'] = twa_deg
+                            self._latest_data['tws_knots'] = tws_knots
+                            updated_any = True
+                            print(f"[UDP DEBUG] Converted APPARENT to TRUE wind: TWA={twa_deg:.2f}°, TWS={tws_knots:.2f}kn")
+                        except Exception as e:
+                            print(f"[UDP WARN] Failed to convert APPARENT to TRUE wind: {e}")
+                            pass
+                    else:
+                        self._latest_data['twa_degrees'] = math.nan
+                        print(f"[UDP DEBUG] Insufficient data to convert APPARENT to TRUE wind: AWA={awa}, AWS={aws}, SOG={sog}, COG={cog}")
 
                 # --- MODIFICATION END ---
 
@@ -297,11 +346,20 @@ class UDPNetworkReader:
                 
                 buffer += data.decode('ascii', errors='ignore')
 
-                while '\n' in buffer:
-                    line, buffer = buffer.split('\n', 1)
-                    line = line.strip('\r\n')
-                    if line:
-                        self._parse_nmea_sentence(line)
+                #while '\n' in buffer:
+                #    line, buffer = buffer.split('\n', 1)
+                #    line = line.strip('\r\n')
+                #    if line:
+                #        self._parse_nmea_sentence(line)
+                # new robust NMEA extractor
+                for match in re.finditer(r'\$[^$]*\*[0-9A-Fa-f]{2}', buffer):
+                    sentence = match.group(0)
+                    self._parse_nmea_sentence(sentence)
+
+                # Trim processed data
+                last = [m.end() for m in re.finditer(r'\$[^$]*\*[0-9A-Fa-f]{2}', buffer)]
+                if last:
+                    buffer = buffer[last[-1]:]
 
             except socket.timeout:
                 continue

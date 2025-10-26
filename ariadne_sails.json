@@ -57,7 +57,7 @@
   },
   "spinnaker": {
     "type": "head_sail",
-    "min_awa": 120,
+    "min_awa": 110,
     "max_awa": 180,
     "min_aws": 4,
     "max_aws": 12

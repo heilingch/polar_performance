@@ -22,10 +22,11 @@ I want to write a program in python which reads a polar performance file from a 
 [X] Add Median Filter for incoming UDP/GPSD data (This version addresses this)
 [X] Improve UDP data loss detection and user notification
 [X] Added support for mixed data sources (e.g., GPS for SOG, UDP for wind)
+[X] Added conversion from AWA/ AWS to true wind data in the udp reader
 
 Author: Christian Heiling
-Date: 2025-05-24
-Version: 6.0 (Updated to add Median Filter)
+Date: 2025-10-26
+Version: 6.1 (Updated to add Median Filter)
 """
 
 # Standard Library Imports
@@ -84,7 +85,7 @@ class MainWindow(QMainWindow):
             print(f"**Warning: Icon not found at {icon_path}")
 
         
-        self.setWindowTitle("Polar Performance Analyzer (@ Christian Heiling) V6.0") 
+        self.setWindowTitle("Polar Performance Analyzer (@ Christian Heiling) V6.1") 
         QApplication.setApplicationName("PolarPerformanceAnalyzer")
         self.polar_processor = PolarProcessor()
         self.ref_polar_processor = PolarProcessor()  
@@ -325,16 +326,13 @@ class MainWindow(QMainWindow):
             new_update_time = latest_data.get('last_update_time', 0)
 
             if new_update_time == self.last_udp_update_time and new_update_time != 0:
-                # No new data has been received since the last check
                 self.udp_no_data_counter += 1
                 if self.udp_no_data_counter >= 10 and not self.udp_stream_stopped:
                     self.log_status("**Warning: UDP data update stopped!")
                     self.udp_stream_stopped = True
             else:
-                # New data has been received
                 if self.udp_stream_stopped:
                     self.log_status("**Info: UDP data update recovered.")
-                
                 self.last_udp_update_time = new_update_time
                 self.udp_no_data_counter = 0
                 self.udp_stream_stopped = False
@@ -343,13 +341,13 @@ class MainWindow(QMainWindow):
             sog_to_use = math.nan
             tws_to_use = math.nan
             twa_to_use = math.nan
-            
+            twd_to_use = math.nan
+
             # Process SOG
             if sog_valid:
                 self.sog_history.append(sog_knots)
                 sog_to_use = self.calculate_median(self.sog_history)
             else:
-                # If no new data, use last median or NaN if empty
                 sog_to_use = self.calculate_median(self.sog_history)
 
             # Process Wind
@@ -357,26 +355,26 @@ class MainWindow(QMainWindow):
                 # Convert negative TWA to positive before filtering
                 if twa_degrees < 0:
                     twa_degrees = abs(twa_degrees)
-                
                 self.tws_history.append(tws_knots)
                 self.twa_history.append(twa_degrees)
-
                 tws_to_use = self.calculate_median(self.tws_history)
                 twa_to_use = self.calculate_median(self.twa_history)
+                twd_to_use = twd_degrees if not math.isnan(twd_degrees) else math.nan
             else:
-                # If no new data, use last median or NaN if empty
                 tws_to_use = self.calculate_median(self.tws_history)
                 twa_to_use = self.calculate_median(self.twa_history)
+                twd_to_use = math.nan
 
             # Update QLineEdit fields only if the filtered data is valid
-            # this allows to use a mix of manually entered and UDP data.
-            # this is important when only GPS but no wind data is available.
             if not math.isnan(sog_to_use):
                 self.boat_speed_input.setText(f"{sog_to_use:.2f}")
             if not math.isnan(tws_to_use):
                 self.tws_input.setText(f"{tws_to_use:.1f}")
             if not math.isnan(twa_to_use):
                 self.twa_input.setText(f"{twa_to_use:.1f}")
+            # Also update TWD field if available
+            if hasattr(self, 'twd_input') and not math.isnan(twd_to_use):
+                self.twd_input.setText(f"{twd_to_use:.1f}")
 
             # Check if we have enough valid data from all sources to trigger calculation
             self.calculate_target_speed()
