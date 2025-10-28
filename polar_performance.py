@@ -23,10 +23,11 @@ I want to write a program in python which reads a polar performance file from a 
 [X] Improve UDP data loss detection and user notification
 [X] Added support for mixed data sources (e.g., GPS for SOG, UDP for wind)
 [X] Added conversion from AWA/ AWS to true wind data in the udp reader
+[X] Fixed tack dependency in AWA --> TWA conversion in udp reader
 
 Author: Christian Heiling
-Date: 2025-10-26
-Version: 6.1 (Updated to add Median Filter)
+Date: 2025-10-28
+Version: 6.2 (UDP Reader Fixes)
 """
 
 # Standard Library Imports
@@ -85,7 +86,7 @@ class MainWindow(QMainWindow):
             print(f"**Warning: Icon not found at {icon_path}")
 
         
-        self.setWindowTitle("Polar Performance Analyzer (@ Christian Heiling) V6.1") 
+        self.setWindowTitle("Polar Performance Analyzer (@ Christian Heiling) V6.2") 
         QApplication.setApplicationName("PolarPerformanceAnalyzer")
         self.polar_processor = PolarProcessor()
         self.ref_polar_processor = PolarProcessor()  

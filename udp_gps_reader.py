@@ -5,33 +5,6 @@ import math
 import re
 
 class UDPNetworkReader:
-    @staticmethod
-    def apparent_to_true_wind(awa_deg, aws_knots, sog_knots):
-        """
-        Convert apparent wind angle/speed and boat speed to true wind angle/speed.
-        Uses the reverse of the tw_2_aw formula from PolarProcessor.
-        Returns (twa_deg, tws_knots)
-        """
-        import numpy as np
-        # Convert to radians
-        awa_rad = np.radians(awa_deg)
-        aws = aws_knots
-        sog = sog_knots
-        # Law of cosines for wind triangle
-        # tws^2 = aws^2 + sog^2 - 2*aws*sog*cos(awa)
-        # Solve for tws
-        tws = np.sqrt(aws**2 + sog**2 - 2*aws*sog*np.cos(awa_rad))
-        # Law of sines for angle
-        # sin(TWA)/sog = sin(AWA)/tws
-        # => TWA = arcsin(sog/tws * sin(awa))
-        if tws == 0:
-            twa = 0.0
-        else:
-            sin_twa = sog / tws * np.sin(awa_rad)
-            # Clamp to [-1, 1] to avoid domain errors
-            sin_twa = np.clip(sin_twa, -1.0, 1.0)
-            twa = np.degrees(np.arcsin(sin_twa))
-        return twa, tws
     """
     Class for reading navigation data from OpenCPN via a network connection (UDP or TCP).
     It parses NMEA0183 sentences to extract Speed Over Ground (SOG), position (Lat/Lon),
@@ -41,6 +14,57 @@ class UDPNetworkReader:
     """
     MPS_TO_KNOTS = 1.94384  # Conversion factor m/s to knots
     KMPH_TO_KNOTS = 0.539957 # Conversion factor km/h to knots
+
+    @staticmethod
+    def apparent_to_true_wind(awa_deg, aws_knots, sog_knots):
+        """
+        Convert apparent wind angle/speed and boat speed to true wind angle/speed.
+        Uses official ORC wind triangle formulas.
+        Handles tack sign according to NMEA MWV convention.
+        Returns (twa_deg, tws_knots)
+        """
+        import numpy as np
+        # Handle very low SOG as special case: TWS = AWS, TWA = AWA
+        if abs(sog_knots) < 0.3:
+            # Use AWA as TWA, AWS as TWS
+            if 0 <= awa_deg <= 180:
+                twa = awa_deg
+            elif 180 < awa_deg < 360:
+                twa = awa_deg - 360
+            else:
+                return float('nan'), float('nan')
+            return twa, aws_knots
+
+        # ORC wind triangle formulas:
+        # TWS^2 = AWS^2 + SOG^2 - 2*AWS*SOG*cos(AWA)
+        # TWA = arccos((AWS*cos(AWA) - SOG)/TWS)
+        # Tack sign: AWA 0-180 = starboard (TWA positive), 180-360 = port (TWA negative)
+        if 0 <= awa_deg <= 180:
+            awa_signed = awa_deg
+            tack_sign = 1
+        elif 180 < awa_deg < 360:
+            awa_signed = awa_deg - 360
+            tack_sign = -1
+        else:
+            return float('nan'), float('nan')
+
+        awa_rad = np.radians(abs(awa_signed))
+        aws = aws_knots
+        sog = sog_knots
+
+        # Calculate TWS using law of cosines
+        tws = np.sqrt(aws**2 + sog**2 - 2*aws*sog*np.cos(awa_rad))
+        # Avoid division by zero
+        if tws < 1e-6:
+            return tack_sign * abs(awa_signed), aws
+
+        # Calculate TWA using law of cosines (ORC official)
+        # cos(TWA) = (AWS*cos(AWA) - SOG)/TWS
+        cos_twa = (aws * np.cos(awa_rad) - sog) / tws
+        cos_twa = np.clip(cos_twa, -1.0, 1.0)
+        twa_abs = np.degrees(np.arccos(cos_twa))
+        twa = tack_sign * twa_abs
+        return twa, tws
 
     def __init__(self, host='0.0.0.0', port=10110, connection_type='udp'):
         """
@@ -251,7 +275,7 @@ class UDPNetworkReader:
                             updated_any = True
                         elif reference == 'R' and not math.isnan(current_speed_knots):
                             # Apparent wind: store AWA/AWS for later conversion
-                            print(f"[UDP DEBUG] Received APPARENT wind: AWA={angle_str}°, AWS={current_speed_knots:.2f}kn (from MWV,R)")
+                            print(f"[UDP DEBUG] Received APPARENT wind: AWA={angle_str}°, AWS={current_speed_knots:.2f}kn (from MWV,R), SOG={self._latest_data['sog_knots']:.2f}kn")
                             awa_0_359 = float(angle_str)
                             awa_normalized = awa_0_359
                             if awa_normalized > 180:
