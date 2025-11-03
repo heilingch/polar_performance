@@ -22,17 +22,21 @@ from datetime import datetime
 TARGET_HOST = '127.0.0.1'  # IP address to send NMEA data to (localhost)
 TARGET_PORT = 10110        # Port to send NMEA data to (must match listener)
 SEND_INTERVAL = 1.0        # Seconds between sending NMEA sentences
-WIND_INSTRUMENTS_ENABLED = False # Set to False to simulate wind instruments being disconnected
+WIND_INSTRUMENTS_ENABLED = True  # Set to False to simulate wind instruments being disconnected
+TRUE_WIND_PROVIDED = False       # Set to False if instruments only provide apparent wind data
+BOAT_COMPASS_ENABLED = True      # Set to False if no magnetic heading/compass is available
+BOAT_LOG_ENABLED = True          # Set to False if no speed-through-water/log is available
 
 # --- Simulation Parameters ---
 # Initial values
-sim_latitude = 47.0707   # Decimal degrees (e.g., Graz, Austria)
-sim_longitude = 15.4395  # Decimal degrees
+sim_latitude = 40.0707   # Decimal degrees (Thyrenian Sea)
+sim_longitude = 15.0095  # Decimal degrees
 sim_sog_knots = 5.0      # Speed Over Ground in knots
 sim_cog_degrees = 45.0   # Course Over Ground in degrees True
 sim_tws_knots = 10.0     # True Wind Speed in knots
 sim_twd_degrees = 270.0   # True Wind Direction in degrees True (from North)
 sim_mag_variation = -2.5 # Magnetic variation, degrees West (-) or East (+)
+sim_water_temp_c = 18.0  # Water temperature in °C (simulated)
 
 # --- Helper Functions ---
 
@@ -165,12 +169,113 @@ def create_wimwv_apparent(awa_deg, aws_knots) -> str:
     checksum = calculate_nmea_checksum(body)
     return f"${body}*{checksum}\r\n"
 
+def create_gpgsa(prn_list, fix_type=3, pdop=1.8, hdop=1.0, vdop=1.5, mode='A') -> str:
+    """Creates a GPGSA sentence (GPS DOP and active satellites).
+
+    prn_list: list of satellite PRNs (ints). We'll insert up to 12 PRNs as required by the NMEA GPGSA format.
+    fix_type: 1 = no fix, 2 = 2D, 3 = 3D
+    mode: 'A' = Automatic, 'M' = Manual
+    """
+    # Ensure PRN list length is at most 12 for the sentence
+    prns = prn_list[:12]
+    # Format PRNs as zero-padded fields or empty if not present
+    prn_fields = [str(p) for p in prns]
+    # Pad remaining fields to reach 12 entries
+    while len(prn_fields) < 12:
+        prn_fields.append("")
+
+    pdop_str = f"{pdop:.1f}"
+    hdop_str = f"{hdop:.1f}"
+    vdop_str = f"{vdop:.1f}"
+
+    body = f"GPGSA,{mode},{fix_type},{','.join(prn_fields)},{pdop_str},{hdop_str},{vdop_str}"
+    checksum = calculate_nmea_checksum(body)
+    return f"${body}*{checksum}\r\n"
+
+def create_gpgsv(prn_list) -> str:
+    """Creates one or more GPGSV sentences (Satellites in view).
+
+    Each GPGSV sentence can contain up to 4 satellite blocks: PRN, elevation, azimuth, SNR.
+    We'll split prn_list into chunks of 4 and create the required number of sentences.
+    """
+    sentences = []
+    total_sats = len(prn_list)
+    if total_sats == 0:
+        # Empty GPGSV with zero satellites
+        body = f"GPGSV,1,1,0"
+        checksum = calculate_nmea_checksum(body)
+        return f"${body}*{checksum}\r\n"
+
+    # Helper to format a satellite block with random elevation/azimuth/snr
+    def sat_block(prn):
+        elev = random.randint(0, 90)
+        azim = random.randint(0, 359)
+        snr = random.randint(20, 50)  # reasonable SNR
+        return f"{prn},{elev},{azim},{snr}"
+
+    chunks = [prn_list[i:i+4] for i in range(0, total_sats, 4)]
+    num_msgs = len(chunks)
+    for idx, chunk in enumerate(chunks, start=1):
+        fields = [f"GPGSV,{num_msgs},{idx},{total_sats}"]
+        # append up to 4 satellite blocks
+        for prn in chunk:
+            fields.append(sat_block(prn))
+        body = ",".join(fields)
+        checksum = calculate_nmea_checksum(body)
+        sentences.append(f"${body}*{checksum}\r\n")
+
+    return "".join(sentences)
+
+def create_iihdg(heading_deg, mag_var_deg=None) -> str:
+    """Creates a IIHDG sentence (magnetic heading with optional variation).
+
+    Format: $IIHDG,heading,deg_dev,dev_dir,mag_var,mag_var_dir*CS
+    We'll leave deviation fields empty and supply magnetic variation when available.
+    """
+    heading_str = f"{heading_deg:.1f}"
+    # Deviation fields left empty
+    if mag_var_deg is None:
+        mag_part = ""
+    else:
+        mag_var_abs = abs(mag_var_deg)
+        mag_var_dir = 'E' if mag_var_deg >= 0 else 'W'
+        mag_part = f",{mag_var_abs:.1f},{mag_var_dir}"
+
+    body = f"IIHDG,{heading_str},,,{mag_part.lstrip(',')}" if mag_part else f"IIHDG,{heading_str},,,"
+    checksum = calculate_nmea_checksum(body)
+    return f"${body}*{checksum}\r\n"
+
+def create_vhw(heading_true_deg, heading_mag_deg, spd_knots, spd_kmh) -> str:
+    """Creates a VHW sentence (Water speed and heading).
+
+    Format: $--VHW,heading_true,T,heading_mag,M,speed_knots,N,speed_kmh,K*CS
+    We'll populate both headings (true and magnetic) where available.
+    """
+    heading_t_str = f"{heading_true_deg:.1f}" if heading_true_deg is not None else ""
+    heading_m_str = f"{heading_mag_deg:.1f}" if heading_mag_deg is not None else ""
+    spd_n_str = f"{spd_knots:.1f}"
+    spd_k_str = f"{spd_kmh:.1f}"
+
+    body = f"VHW,{heading_t_str},T,{heading_m_str},M,{spd_n_str},N,{spd_k_str},K"
+    checksum = calculate_nmea_checksum(body)
+    return f"${body}*{checksum}\r\n"
+
+def create_mtw(water_temp_c) -> str:
+    """Creates an MTW sentence (Water Temperature).
+
+    Format: $--MTW,xx.x,C*CS
+    """
+    temp_str = f"{water_temp_c:.1f}"
+    body = f"MTW,{temp_str},C"
+    checksum = calculate_nmea_checksum(body)
+    return f"${body}*{checksum}\r\n"
+
 
 # --- Main Simulation Loop ---
 def run_simulator(host, port, interval):
     """Runs the NMEA simulator, sending data over UDP."""
     global sim_latitude, sim_longitude, sim_sog_knots, sim_cog_degrees
-    global sim_tws_knots, sim_twd_degrees, sim_mag_variation
+    global sim_tws_knots, sim_twd_degrees, sim_mag_variation, sim_water_temp_c
 
     # Create UDP socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -218,6 +323,9 @@ def run_simulator(host, port, interval):
             sim_sog_kmh = sim_sog_knots * 1.852 # Knots to km/h
             sim_twd_magnetic = (sim_twd_degrees - sim_mag_variation + 360) % 360
             sim_tws_mps = sim_tws_knots * 0.514444 # Knots to m/s
+            # Simulate small variations in water temperature
+            sim_water_temp_c += random.uniform(-0.05, 0.05)
+            sim_water_temp_c = max(-2.0, min(sim_water_temp_c, 35.0))
             
             # Calculate a plausible TWA (True Wind Angle)
             # TWA = TWD - COG. Normalize to -180 to +180.
@@ -236,25 +344,57 @@ def run_simulator(host, port, interval):
 
 
             # --- Generate NMEA Sentences ---
+            # Generate a realistic number of satellites and PRN list
+            num_sats = random.randint(5, 12)
+            # Simulate PRNs in the range 1..32 (GPS) and choose unique set
+            possible_prns = list(range(1, 33))
+            random.shuffle(possible_prns)
+            prn_list = possible_prns[:num_sats]
+
             nmea_gprmc = create_gprmc(current_utc_time, sim_latitude, sim_longitude,
                                       sim_sog_knots, sim_cog_degrees, sim_mag_variation)
             nmea_gpgga = create_gpgga(current_utc_time, sim_latitude, sim_longitude,
-                                      num_sats=random.randint(7,12), hdop=random.uniform(0.8, 2.0))
+                                      num_sats=num_sats, hdop=random.uniform(0.8, 2.0))
+            # Create GPGSA sentence with PDOP/HDOP/VDOP values
+            gpgsa_pdop = round(random.uniform(1.0, 2.5), 1)
+            gpgsa_hdop = round(random.uniform(0.6, 2.0), 1)
+            gpgsa_vdop = round(random.uniform(0.8, 2.5), 1)
+            nmea_gpgsa = create_gpgsa(prn_list, fix_type=3 if num_sats >= 4 else 2, pdop=gpgsa_pdop, hdop=gpgsa_hdop, vdop=gpgsa_vdop)
+            # Create GPGSV sentences (satellites in view) so satellite display can show PRNs/elev/azim/SNR
+            nmea_gpgsv = create_gpgsv(prn_list)
             nmea_gpvtg = create_gpvtg(sim_cog_degrees, sim_cog_magnetic, sim_sog_knots, sim_sog_kmh)
 
             # --- Send data ---
-            full_nmea_packet = nmea_gprmc + nmea_gpgga + nmea_gpvtg
+            full_nmea_packet = nmea_gprmc + nmea_gpgga + nmea_gpgsa + nmea_gpgsv + nmea_gpvtg
+
+            # Add heading (compass) and speed-through-water/log sentences if enabled.
+            # These help OpenCPN calculate true wind from apparent wind.
+            if BOAT_COMPASS_ENABLED:
+                nmea_hdg = create_iihdg(sim_cog_degrees, sim_mag_variation)
+                full_nmea_packet += nmea_hdg
+
+            if BOAT_LOG_ENABLED:
+                nmea_vhw = create_vhw(sim_cog_degrees, sim_cog_magnetic, sim_sog_knots, sim_sog_kmh)
+                nmea_mtw = create_mtw(sim_water_temp_c)
+                full_nmea_packet += nmea_vhw + nmea_mtw
             
             if WIND_INSTRUMENTS_ENABLED:
-                nmea_wimwd = create_wimwd(sim_twd_degrees, sim_twd_magnetic, sim_tws_knots, sim_tws_mps)
-                # Choose to send True or Apparent wind via MWV, or both if your system expects it.
-                # OpenCPN often uses MWD for True and MWV (with 'R') for Apparent.
-                # Sending both True and Apparent MWV might be redundant if MWD is also sent.
-                # For this example, let's send one MWV for True Wind Angle/Speed and one for Apparent.
-                # Note: The 'T' in MWV for true wind angle means the angle is relative to the bow, and the wind data is "True".
-                # It does NOT mean the angle is relative to True North (that would be TWD, typically from MWD).
-                nmea_wimwv_true = create_wimwv_true(twa_calculated, sim_tws_knots)
+                # Always send apparent wind data when instruments are enabled
+                nmea_wimwv_app = create_wimwv_apparent(sim_awa_degrees, sim_aws_knots)
+                full_nmea_packet += nmea_wimwv_app
+
+                # Initialize wind sentence variables
+                nmea_wimwd = ""
+                nmea_wimwv_true = ""
                 nmea_wimwv_apparent = create_wimwv_apparent(sim_awa_degrees, sim_aws_knots)
+
+                if TRUE_WIND_PROVIDED:
+                    # Only create true wind data if configured to do so
+                    nmea_wimwd = create_wimwd(sim_twd_degrees, sim_twd_magnetic, sim_tws_knots, sim_tws_mps)
+                    nmea_wimwv_true = create_wimwv_true(twa_calculated, sim_tws_knots)
+
+                # Add all wind sentences to the packet
+                # Empty strings will be ignored in concatenation if TRUE_WIND_PROVIDED is False
                 full_nmea_packet += nmea_wimwd + nmea_wimwv_true + nmea_wimwv_apparent
             
             sock.sendto(full_nmea_packet.encode('ascii'), (host, port))
@@ -264,9 +404,12 @@ def run_simulator(host, port, interval):
             else:
                 wind_info = "TWS=---, TWD=---, TWA=---"
             
+            # Include satellite count in the log output for visibility
+            sats_info = f"SATS={num_sats}" if 'num_sats' in locals() else "SATS=--"
+            water_info = f"WATERT={sim_water_temp_c:.1f}C" if 'sim_water_temp_c' in locals() else "WATERT=--"
             print(f"Sent at {current_utc_time.strftime('%H:%M:%S')}: "
                   f"Lat={sim_latitude:.4f}, Lon={sim_longitude:.4f}, SOG={sim_sog_knots:.1f}kn, COG={sim_cog_degrees:.0f}°, "
-                  f"{wind_info}")
+                  f"{sats_info}, {water_info}, {wind_info}")
 
             time.sleep(interval)
 
