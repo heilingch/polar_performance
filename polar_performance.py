@@ -24,10 +24,11 @@ I want to write a program in python which reads a polar performance file from a 
 [X] Added support for mixed data sources (e.g., GPS for SOG, UDP for wind)
 [X] Added conversion from AWA/ AWS to true wind data in the udp reader
 [X] Fixed tack dependency in AWA --> TWA conversion in udp reader
+[X] Added native Signal K network input for SOG, TWS, TWA, TWD
 
 Author: Christian Heiling
-Date: 2025-10-28
-Version: 6.2 (UDP Reader Fixes)
+Date: 2026-10-17
+Version: 7.0 (Native Signal K Support)
 """
 
 # Standard Library Imports
@@ -61,12 +62,22 @@ except ImportError:
     print("**ERR: Could not import UDPNetworkReader. Make sure 'udp_gps_reader.py' is accessible.")
     UDPNetworkReader = None 
 
+try:
+    from signalK_reader import SignalKReader
+except ImportError:
+    print("**ERR: Could not import SignalKReader. Make sure 'signalK_reader.py' and its dependencies ('websocket-client', 'requests') are accessible.")
+    SignalKReader = None
+
 
 # Definition of constants
 GPS_UPDATE_INTERVAL_MS = 1000  # Update GPS speed every second (determines filter sample rate)
 UDP_UPDATE_INTERVAL_MS = 1000  # Update UDP data every second (determines filter sample rate)
 UDP_DEFAULT_HOST = '127.0.0.1' 
 UDP_DEFAULT_PORT = 10110       
+SIGNALK_UPDATE_INTERVAL_MS = 1000  # Update Signal K data every second
+SIGNALK_DEFAULT_HOST = '127.0.0.1'
+SIGNALK_DEFAULT_PORT = 3000
+SIGNALK_DEFAULT_URL = f"http://{SIGNALK_DEFAULT_HOST}:{SIGNALK_DEFAULT_PORT}"       
 
 # GUI classes
 
@@ -86,7 +97,7 @@ class MainWindow(QMainWindow):
             print(f"**Warning: Icon not found at {icon_path}")
 
         
-        self.setWindowTitle("Polar Performance Analyzer (@ Christian Heiling) V6.2") 
+        self.setWindowTitle("Polar Performance Analyzer (@ Christian Heiling) V7.0") 
         QApplication.setApplicationName("PolarPerformanceAnalyzer")
         self.polar_processor = PolarProcessor()
         self.ref_polar_processor = PolarProcessor()  
@@ -107,6 +118,15 @@ class MainWindow(QMainWindow):
         self.udp_stream_stopped = False
         self.last_udp_update_time = 0  # Initialize last update time for UDP
 
+        self.signalk_reader = None
+        self.signalk_timer = QTimer()
+        self.signalk_timer.timeout.connect(self.update_signalk_data)
+        
+        # Add new variables for Signal K timeout detection
+        self.signalk_no_data_counter = 0
+        self.signalk_stream_stopped = False
+        self.last_signalk_update_time = 0  # Initialize last update time for Signal K
+
         # Initialize Deques and filter settings for Median Filter.
         self.filter_options = {"None": 1, "15 s": 15, "30 s": 30, "1 min": 60, "5 min": 300}
         self.current_filter_size = 1 # Default to "None" (size 1)
@@ -124,7 +144,7 @@ class MainWindow(QMainWindow):
         source_filter_section = QHBoxLayout()
         self.speed_source_label = QLabel("Speed Source:")
         self.speed_source_combo = QComboBox()
-        self.speed_source_combo.addItems(["Manual Entry", "GPSD", "UDP Network"])
+        self.speed_source_combo.addItems(["Manual Entry", "GPSD", "UDP Network", "Signal K"])
         self.speed_source_combo.setFixedSize(150, 30)
         self.speed_source_combo.currentIndexChanged.connect(self.speed_source_changed)
         
@@ -261,6 +281,8 @@ class MainWindow(QMainWindow):
         if self.gps_speed_reader is not None: self.gps_speed_reader.close(); self.gps_speed_reader = None
         if self.udp_timer.isActive(): self.udp_timer.stop()
         if self.udp_network_reader is not None: self.udp_network_reader.close(); self.udp_network_reader = None
+        if self.signalk_timer.isActive(): self.signalk_timer.stop()
+        if self.signalk_reader is not None: self.signalk_reader.close(); self.signalk_reader = None
 
         if selected_source == "GPSD":
             self.twa_input.setReadOnly(False) 
@@ -287,6 +309,28 @@ class MainWindow(QMainWindow):
             if self.udp_network_reader is None: self.udp_network_reader = UDPNetworkReader(host=UDP_DEFAULT_HOST, port=UDP_DEFAULT_PORT, connection_type='udp')
             if self.udp_network_reader.sock is not None: self.udp_timer.start(UDP_UPDATE_INTERVAL_MS); self.log_status(f"UDP listener started.")
             else: self.log_status(f"**ERR: Could not start UDP listener."); self.twa_input.setText("UDP Error"); self.tws_input.setText("UDP Error"); self.boat_speed_input.setText("UDP Error")
+
+        elif selected_source == "Signal K":
+            self.twa_input.setReadOnly(True)
+            self.tws_input.setReadOnly(True)
+            self.boat_speed_input.setReadOnly(True)
+            self.calc_button.setEnabled(False)
+
+            # Enable filter selection for Signal K mode.
+            self.filter_combo.setEnabled(True)
+
+            if SignalKReader is None:
+                self.log_status("**ERR: SignalKReader not available (check websocket-client and requests)...")
+                self.twa_input.setText("SignalK Error")
+                self.tws_input.setText("SignalK Error")
+                self.boat_speed_input.setText("SignalK Error")
+                return
+
+            signalk_url = os.environ.get("SIGNALK_URL", SIGNALK_DEFAULT_URL)
+            if self.signalk_reader is None:
+                self.signalk_reader = SignalKReader(server_url=signalk_url)
+            self.signalk_timer.start(SIGNALK_UPDATE_INTERVAL_MS)
+            self.log_status(f"Signal K reader connected to {signalk_url}.")
         
         else: # Manual Entry mode
             self.twa_input.setReadOnly(False)
@@ -380,8 +424,70 @@ class MainWindow(QMainWindow):
             # Check if we have enough valid data from all sources to trigger calculation
             self.calculate_target_speed()
 
+    def update_signalk_data(self):
+        if self.signalk_reader is not None:
+            latest_data = self.signalk_reader.get_latest_data() 
+            sog_valid, sog_knots = self.signalk_reader.get_sog_knots()
+            wind_valid, tws_knots, twd_degrees, twa_degrees = self.signalk_reader.get_true_wind()
+
+            # Handle Event logging when data stream stops or recovers
+            new_update_time = latest_data.get('last_update_time', 0)
+
+            if new_update_time == self.last_signalk_update_time and new_update_time != 0:
+                self.signalk_no_data_counter += 1
+                if self.signalk_no_data_counter >= 10 and not self.signalk_stream_stopped:
+                    self.log_status("**Warning: Signal K data update stopped!")
+                    self.signalk_stream_stopped = True
+            else:
+                if self.signalk_stream_stopped:
+                    self.log_status("**Info: Signal K data update recovered.")
+                self.last_signalk_update_time = new_update_time
+                self.signalk_no_data_counter = 0
+                self.signalk_stream_stopped = False
+
+            # Apply median filter to incoming SOG, TWS, TWA Signal K data.
+            sog_to_use = math.nan
+            tws_to_use = math.nan
+            twa_to_use = math.nan
+            twd_to_use = math.nan
+
+            # Process SOG
+            if sog_valid:
+                self.sog_history.append(sog_knots)
+                sog_to_use = self.calculate_median(self.sog_history)
+            else:
+                sog_to_use = self.calculate_median(self.sog_history)
+
+            # Process Wind
+            if wind_valid:
+                # Convert negative TWA to positive before filtering
+                if twa_degrees < 0:
+                    twa_degrees = abs(twa_degrees)
+                self.tws_history.append(tws_knots)
+                self.twa_history.append(twa_degrees)
+                tws_to_use = self.calculate_median(self.tws_history)
+                twa_to_use = self.calculate_median(self.twa_history)
+                twd_to_use = twd_degrees if not math.isnan(twd_degrees) else math.nan
+            else:
+                tws_to_use = self.calculate_median(self.tws_history)
+                twa_to_use = self.calculate_median(self.twa_history)
+                twd_to_use = math.nan
+
+            # Update QLineEdit fields only if the filtered data is valid
+            if not math.isnan(sog_to_use):
+                self.boat_speed_input.setText(f"{sog_to_use:.2f}")
+            if not math.isnan(tws_to_use):
+                self.tws_input.setText(f"{tws_to_use:.1f}")
+            if not math.isnan(twa_to_use):
+                self.twa_input.setText(f"{twa_to_use:.1f}")
+            if hasattr(self, 'twd_input') and not math.isnan(twd_to_use):
+                self.twd_input.setText(f"{twd_to_use:.1f}")
+
+            # Check if we have enough valid data from all sources to trigger calculation
+            self.calculate_target_speed()
+
     def validate_float_input(self, text, field_name):
-        if text == "---" or text == "UDP Error" or text == "GPSD Error": 
+        if text in ("---", "UDP Error", "GPSD Error", "SignalK Error"): 
             return False, f"{field_name} data not available."
         try:
             value = float(text)
@@ -517,6 +623,8 @@ class MainWindow(QMainWindow):
         if self.gps_speed_reader is not None: self.gps_speed_reader.close()
         if self.udp_timer.isActive(): self.udp_timer.stop()
         if self.udp_network_reader is not None: self.udp_network_reader.close()
+        if self.signalk_timer.isActive(): self.signalk_timer.stop()
+        if self.signalk_reader is not None: self.signalk_reader.close()
         if hasattr(self, 'swell_adjustment_tool') and self.swell_adjustment_tool.isVisible(): self.swell_adjustment_tool.close()
         event.accept()
 

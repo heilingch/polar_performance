@@ -1,9 +1,9 @@
 # Polar Performance Analyzer
 
-**Version:** 6.0
+**Version:** 7.0
 **Author:** Christian Heiling
 
-A PyQt6 desktop application for sailors and naval architects to analyze, visualize, and utilize yacht polar performance data. The tool can calculate target speeds, determine optimal sailing angles (VMG), and assess real-time performance against theoretical data using live data from NMEA sources.
+A PyQt6 desktop application for sailors and naval architects to analyze, visualize, and utilize yacht polar performance data. The tool can calculate target speeds, determine optimal sailing angles (VMG), and assess real-time performance against theoretical data using live data from NMEA and Signal K sources.
 
 ![Polar Performance Analyzer Main Window](https://github.com/heilingch/polar_performance/blob/main/polar_performance_mainwindow.png)
 
@@ -24,7 +24,8 @@ A PyQt6 desktop application for sailors and naval architects to analyze, visuali
     -   **Manual Entry**: Manually input TWA, TWS, and SOG.
     -   **GPSD**: Connects to a local `gpsd` service to read live SOG.
     -   **UDP Network**: Listens on a UDP port (e.g., for data from OpenCPN, Expedition, or other NMEA broadcasters) for SOG, TWA, and TWS.
--   **Data Filtering**: Includes a configurable median filter to smooth noisy data from GPSD or UDP sources, improving the stability of calculations.
+    -   **Signal K**: Connects natively to a Signal K server (HTTP/WebSocket API) to read live SOG, COG, position, TWS, TWA, and TWD.
+-   **Data Filtering**: Includes a configurable median filter to smooth noisy data from GPSD, UDP, or Signal K sources, improving the stability of calculations.
 -   **Reference Polar**: Load a second, reference polar file to compare two different performance models on the same plot (e.g., different sail configurations or boats).
 -   **Swell Adjustment Tool**: A utility to modify polar data based on sea state.
 
@@ -53,11 +54,13 @@ The project is written in Python and requires the following libraries:
 -   `numpy`
 -   `matplotlib`
 -   `gpsd-py3` (for the GPSD connection)
+-   `requests` (for Signal K endpoint discovery)
+-   `websocket-client` (for Signal K data streaming)
 
 You can install them using pip:
 
 ```bash
-pip install PyQt6 numpy matplotlib gpsd-py3
+pip install PyQt6 numpy matplotlib gpsd-py3 requests websocket-client
 ```
 
 ### Running the Application
@@ -65,7 +68,7 @@ pip install PyQt6 numpy matplotlib gpsd-py3
 1.  Navigate to the project directory.
 2.  Run the main application:
     ```bash
-    python polar_performance_v5.py
+    python polar_performance.py
     ```
 
 ### Testing with the NMEA Simulator
@@ -82,9 +85,10 @@ pip install PyQt6 numpy matplotlib gpsd-py3
 
 ## Project Structure
 
--   `polar_performance_v5.py`: The main application file containing the GUI and primary logic.
+-   `polar_performance.py`: The main application file containing the GUI and primary logic.
 -   `polar_processor.py`: A class responsible for loading, parsing, and interpolating polar data.
 -   `udp_gps_reader.py`: A class for handling incoming NMEA data from a UDP network stream.
+-   `signalK_reader.py`: A class for handling incoming navigation and wind data from a Signal K server.
 -   `gpsd_handler.py`: A class for reading speed data from a `gpsd` service.
 -   `swell_adjustment_tool.py`: The GUI and logic for the swell adjustment utility.
 -   `test_software/`: Contains the NMEA dummy data generator for testing.

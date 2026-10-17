@@ -1,34 +1,38 @@
 """
-Class for reading navigation data using Signal K.
-Author: [Your Name]
-Last modified: 2025-05-09
+Class for reading navigation and wind data using Signal K.
+Author: Christian Heiling
+Last modified: 2026-10-17
+Version: 7.0 (Native Signal K Support)
 
-This class connects to a Signal K server to retrieve navigation data including:
+This class connects to a Signal K server to retrieve navigation and wind data including:
 - GPS speed (in knots)
+- Course over ground (COG in degrees)
 - GPS position (latitude/longitude)
-- Fix quality and accuracy
-- True wind speed (TWS)
-- True wind angle (TWA)
-- True wind direction (TWD)
+- Fix quality, satellites count, and accuracy
+- True wind speed (TWS in knots)
+- True wind angle (TWA in degrees)
+- True wind direction (TWD in degrees)
 
-The implementation follows a similar pattern to the GPSSpeedReader but expands
-functionality to include wind data needed for polar performance calculations.
+The implementation matches the interface used by UDPNetworkReader and GPSSpeedReader
+for seamless integration into the Polar Performance Analyzer.
 
-
-# sudo apt install python3-websocket
+Dependencies:
+    pip install requests websocket-client
+    (or: sudo apt install python3-requests python3-websocket)
 """
-
 
 import threading
 import time
 import math
 import json
+from urllib.parse import urljoin, urlparse, urlunparse
 import websocket
 import requests
-from urllib.parse import urljoin
 
 
 class SignalKReader:
+    MPS_TO_KNOTS = 1.94384  # conversion factor from m/s to knots
+
     def __init__(self, server_url="http://localhost:3000"):
         """
         Initialize the Signal K reader.
@@ -45,327 +49,375 @@ class SignalKReader:
         
         # Navigation data
         self._latest_speed = math.nan  # Speed over ground in knots
-        self._fix_mode = 0              # 0: no fix, 1: bad fix, 2: 2D fix, 3: 3D fix
-        self._lat = None
-        self._lon = None
-        self._accuracy = None           # Horizontal position accuracy in meters
-        self._satellites_count = None   # Number of satellites used in fix
+        self._fix_mode = 0             # 0: no fix, 1: bad fix, 2: 2D fix, 3: 3D fix
+        self._lat = math.nan
+        self._lon = math.nan
+        self._cog = math.nan           # Course over ground in degrees
+        self._heading_true = math.nan  # True heading in degrees
+        self._accuracy = math.nan      # Horizontal position accuracy in meters
+        self._satellites_count = 0     # Number of satellites used in fix
         
         # Wind data
         self._tws = math.nan           # True wind speed in knots
-        self._twa = math.nan           # True wind angle in degrees
-        self._twd = math.nan           # True wind direction in degrees
+        self._twa = math.nan           # True wind angle in degrees (-180 to +180)
+        self._twd = math.nan           # True wind direction in degrees (0 to 360)
+        
+        # Server identity tracking (to filter out AIS targets)
+        self._self_urn = None
+        
+        # Timestamp of last data update
+        self._last_update_time = 0.0
         
         # Polling thread control flag
         self._running = True
         
+        # Discover endpoints and start background listener thread
         try:
-            # Connect to Signal K server and discover endpoints
             self._discover_endpoints()
-            
-            # Start background thread
-            self._thread = threading.Thread(target=self._connect_and_listen)
-            self._thread.daemon = True
-            self._thread.start()
-            
         except Exception as e:
-            print(f"**ERR SIGNALK: Could not connect to Signal K server: {e}")
+            print(f"**WARN SIGNALK: Initial discovery failed ({e}), will retry in background.")
             self.ws_url = None
-    
+        
+        self._thread = threading.Thread(target=self._connect_and_listen)
+        self._thread.daemon = True
+        self._thread.start()
+
+    def _resolve_ws_url(self, ws_stream):
+        """
+        Converts a relative or absolute WebSocket stream path into a fully qualified ws:// or wss:// URL.
+        """
+        if ws_stream.startswith('/'):
+            ws_prefix = 'wss://' if self.server_url.startswith('https') else 'ws://'
+            server_domain = self.server_url.split('://', 1)[1]
+            return ws_prefix + server_domain + ws_stream
+        
+        # If the URL is absolute, ensure the hostname matches server_url's host if ws_stream returned localhost
+        parsed_server = urlparse(self.server_url)
+        parsed_ws = urlparse(ws_stream)
+        
+        if parsed_server.hostname not in ('localhost', '127.0.0.1', None) and parsed_ws.hostname in ('localhost', '127.0.0.1'):
+            ws_netloc = f"{parsed_server.hostname}:{parsed_ws.port or parsed_server.port or 3000}"
+            return urlunparse((parsed_ws.scheme, ws_netloc, parsed_ws.path, parsed_ws.params, parsed_ws.query, parsed_ws.fragment))
+        
+        return ws_stream
+
     def _discover_endpoints(self):
         """
         Discover Signal K endpoints by querying the server's API.
-        Sets the WebSocket URL for data streaming.
+        Signal K standard specifies 'signalk-ws' in endpoints['v1'].
         """
         try:
-            # Get the endpoints from the Signal K server
-            response = requests.get(urljoin(self.server_url, "/signalk"))
-            if response.status_code != 200:
-                print(f"**ERR SIGNALK: Failed to discover endpoints: {response.status_code}")
-                return
-            
-            endpoints = response.json()
-            
-            # Find the WebSocket stream endpoint
-            if 'endpoints' in endpoints and 'v1' in endpoints['endpoints']:
-                v1 = endpoints['endpoints']['v1']
-                if 'stream' in v1:
-                    self.ws_url = v1['stream']
-                    
-                    # If the WebSocket URL is relative, make it absolute
-                    if self.ws_url.startswith('/'):
-                        # Convert http(s):// to ws(s)://
-                        if self.server_url.startswith('https'):
-                            ws_prefix = 'wss://'
-                        else:
-                            ws_prefix = 'ws://'
-                        
-                        server_domain = self.server_url.split('://', 1)[1]
-                        self.ws_url = ws_prefix + server_domain + self.ws_url
-                    
-                    print(f"**INF SIGNALK: WebSocket URL: {self.ws_url}")
-                    return
-            
-            print("**ERR SIGNALK: Could not find v1/stream endpoint")
-            
+            response = requests.get(urljoin(self.server_url, "/signalk"), timeout=2.0)
+            if response.status_code == 200:
+                endpoints = response.json()
+                
+                # Check for Signal K v1 endpoint specification ('signalk-ws')
+                if 'endpoints' in endpoints and 'v1' in endpoints['endpoints']:
+                    v1 = endpoints['endpoints']['v1']
+                    # Look for standard 'signalk-ws', with fallbacks to 'stream' or 'ws'
+                    ws_stream = v1.get('signalk-ws') or v1.get('stream') or v1.get('ws')
+                    if ws_stream:
+                        self.ws_url = self._resolve_ws_url(ws_stream)
+                        print(f"**INF SIGNALK: WebSocket URL discovered: {self.ws_url}")
+                        return
+
+            print(f"**WARN SIGNALK: Discovery at {self.server_url}/signalk did not provide 'signalk-ws', using default endpoint path.")
         except Exception as e:
-            print(f"**ERR SIGNALK: Error discovering endpoints: {e}")
-    
+            print(f"**WARN SIGNALK: Error during endpoint discovery: {e}, falling back to default stream URL.")
+
+        # Default fallback stream endpoint
+        parsed = urlparse(self.server_url)
+        scheme = 'wss' if parsed.scheme == 'https' else 'ws'
+        netloc = parsed.netloc or f"{parsed.hostname or '127.0.0.1'}:{parsed.port or 3000}"
+        self.ws_url = f"{scheme}://{netloc}/signalk/v1/stream"
+        print(f"**INF SIGNALK: Using fallback WebSocket URL: {self.ws_url}")
+
+    def _on_open(self, ws):
+        """
+        Called when WebSocket connection is opened.
+        Subscribes to navigation and wind paths for the local vessel.
+        """
+        print(f"**INF SIGNALK: WebSocket connection opened to {self.ws_url}")
+        try:
+            # Subscribing to wildcard navigation.* and environment.wind.*
+            subscription = {
+                "context": "vessels.self",
+                "subscribe": [
+                    {
+                        "path": "navigation.*",
+                        "period": 1000
+                    },
+                    {
+                        "path": "environment.wind.*",
+                        "period": 1000
+                    }
+                ]
+            }
+            ws.send(json.dumps(subscription))
+        except Exception as e:
+            print(f"**WARN SIGNALK: Error sending subscription: {e}")
+
     def _connect_and_listen(self):
         """
         Background thread that connects to the Signal K WebSocket
-        and listens for navigation data.
+        and listens for navigation and wind data.
         """
         while self._running:
             try:
                 if not self.ws_url:
-                    print("**ERR SIGNALK: No WebSocket URL available")
-                    time.sleep(5)
-                    continue
-                
-                # Connect to the WebSocket with a subscription request
-                subscription = {
-                    "context": "vessels.self",
-                    "subscribe": [
-                        {
-                            "path": "navigation.speedOverGround",
-                            "period": 1000
-                        },
-                        {
-                            "path": "navigation.position",
-                            "period": 1000
-                        },
-                        {
-                            "path": "navigation.gnss.methodQuality",
-                            "period": 1000
-                        },
-                        {
-                            "path": "navigation.gnss.horizontalDilution",
-                            "period": 1000
-                        },
-                        {
-                            "path": "navigation.gnss.satellitesInView",
-                            "period": 1000
-                        },
-                        {
-                            "path": "environment.wind.speedTrue",
-                            "period": 1000
-                        },
-                        {
-                            "path": "environment.wind.angleTrueWater",
-                            "period": 1000
-                        },
-                        {
-                            "path": "environment.wind.directionTrue",
-                            "period": 1000
-                        }
-                    ]
-                }
+                    self._discover_endpoints()
+                    if not self.ws_url:
+                        time.sleep(3)
+                        continue
                 
                 self.ws = websocket.WebSocketApp(
                     self.ws_url,
-                    on_open=lambda ws: ws.send(json.dumps(subscription)),
+                    on_open=self._on_open,
                     on_message=self._on_message,
                     on_error=self._on_error,
                     on_close=self._on_close
                 )
                 
-                print("**INF SIGNALK: Connecting to Signal K server...")
+                print(f"**INF SIGNALK: Connecting to Signal K server at {self.ws_url}...")
                 self.ws.run_forever()
                 
-                # If we get here, the connection was closed
                 if self._running:
-                    print("**INF SIGNALK: Connection closed, reconnecting in 5 seconds...")
-                    time.sleep(5)
+                    print("**INF SIGNALK: Connection closed, reconnecting in 3 seconds...")
+                    time.sleep(3)
                 
             except Exception as e:
-                print(f"**ERR SIGNALK: Error in WebSocket connection: {e}")
-                time.sleep(5)
-    
+                if self._running:
+                    print(f"**ERR SIGNALK: Error in WebSocket connection: {e}")
+                    time.sleep(3)
+
     def _on_message(self, ws, message):
         """
         Handle incoming WebSocket messages.
-        Parse the JSON data and update the navigation and wind information.
+        Parse the JSON delta data and update navigation and wind information.
         """
         try:
             data = json.loads(message)
-            updated = False
+            now = time.time()
             
+            # Handle server hello message
+            if "self" in data and isinstance(data["self"], str):
+                self._self_urn = data["self"]
+
+            # Filter out updates intended for other vessels (e.g. AIS targets)
+            msg_context = data.get("context")
+            if msg_context and self._self_urn and msg_context not in ("vessels.self", self._self_urn):
+                return
+
+            updated = False
             with self._lock:
-                # Check if it's a delta message
                 if "updates" in data:
                     for update in data["updates"]:
                         if "values" in update:
-                            for value in update["values"]:
-                                # Handle navigation data
-                                if value["path"] == "navigation.speedOverGround":
-                                    # Convert from m/s to knots
-                                    self._latest_speed = value["value"] * 1.94384
-                                    updated = True
-                                    
-                                elif value["path"] == "navigation.position":
-                                    if "longitude" in value["value"] and "latitude" in value["value"]:
-                                        self._lon = value["value"]["longitude"]
-                                        self._lat = value["value"]["latitude"]
+                            for item in update["values"]:
+                                path = item.get("path")
+                                val = item.get("value")
+                                
+                                if val is None:
+                                    continue
+                                
+                                # SOG: m/s -> knots
+                                if path == "navigation.speedOverGround":
+                                    if isinstance(val, (int, float)):
+                                        self._latest_speed = float(val) * self.MPS_TO_KNOTS
+                                        if self._fix_mode < 1:
+                                            self._fix_mode = 1
                                         updated = True
-                                        
-                                elif value["path"] == "navigation.gnss.methodQuality":
-                                    # Map the Signal K quality value to our fix mode
-                                    quality = value["value"]
-                                    if quality == "no fix":
-                                        self._fix_mode = 0
-                                    elif quality == "fix":
-                                        self._fix_mode = 2
-                                    elif quality == "differential":
-                                        self._fix_mode = 3
-                                    updated = True
-                                    
-                                elif value["path"] == "navigation.gnss.horizontalDilution":
-                                    # HDOP is related to accuracy but needs conversion
-                                    # A rough estimate: accuracy in meters is about HDOP * 5
-                                    self._accuracy = value["value"] * 5
-                                    updated = True
-                                    
-                                elif value["path"] == "navigation.gnss.satellitesInView":
-                                    self._satellites_count = value["value"]
+                                
+                                # COG: radians -> degrees (0-360)
+                                elif path == "navigation.courseOverGroundTrue":
+                                    if isinstance(val, (int, float)):
+                                        self._cog = (math.degrees(float(val))) % 360
+                                        updated = True
+
+                                # Heading True: radians -> degrees (0-360)
+                                elif path == "navigation.headingTrue":
+                                    if isinstance(val, (int, float)):
+                                        self._heading_true = (math.degrees(float(val))) % 360
+                                        updated = True
+                                
+                                # Position
+                                elif path == "navigation.position":
+                                    if isinstance(val, dict):
+                                        lat = val.get("latitude")
+                                        lon = val.get("longitude")
+                                        if lat is not None and lon is not None:
+                                            self._lat = float(lat)
+                                            self._lon = float(lon)
+                                            if self._fix_mode < 1:
+                                                self._fix_mode = 1
+                                            updated = True
+                                
+                                # GNSS fix quality
+                                elif path == "navigation.gnss.methodQuality":
+                                    if isinstance(val, str):
+                                        q = val.lower()
+                                        if "no" in q:
+                                            self._fix_mode = 0
+                                        elif "diff" in q or "dgps" in q:
+                                            self._fix_mode = 3
+                                        else:
+                                            self._fix_mode = 2
+                                    elif isinstance(val, (int, float)):
+                                        self._fix_mode = int(val)
                                     updated = True
                                 
-                                # Handle wind data
-                                elif value["path"] == "environment.wind.speedTrue":
-                                    # Convert from m/s to knots
-                                    self._tws = value["value"] * 1.94384
-                                    updated = True
-                                    
-                                elif value["path"] == "environment.wind.angleTrueWater":
-                                    # Convert from radians to degrees if needed
-                                    if isinstance(value["value"], float) and abs(value["value"]) <= math.pi:
-                                        self._twa = math.degrees(value["value"])
-                                    else:
-                                        self._twa = value["value"]
-                                    updated = True
-                                    
-                                elif value["path"] == "environment.wind.directionTrue":
-                                    # Convert from radians to degrees if needed
-                                    if isinstance(value["value"], float) and abs(value["value"]) <= math.pi * 2:
-                                        self._twd = math.degrees(value["value"])
-                                    else:
-                                        self._twd = value["value"]
-                                    updated = True
-            
-            if updated:
-                self._print_info()
+                                # HDOP / Horizontal dilution
+                                elif path == "navigation.gnss.horizontalDilution":
+                                    if isinstance(val, (int, float)):
+                                        self._accuracy = float(val) * 5.0
+                                        updated = True
+                                
+                                # Satellites
+                                elif path in ("navigation.gnss.satellites", "navigation.gnss.satellitesInView"):
+                                    if isinstance(val, (int, float)):
+                                        self._satellites_count = int(val)
+                                        updated = True
+                                    elif isinstance(val, dict) and "count" in val:
+                                        self._satellites_count = int(val["count"])
+                                        updated = True
+                                
+                                # TWS: m/s -> knots
+                                elif path == "environment.wind.speedTrue":
+                                    if isinstance(val, (int, float)):
+                                        self._tws = float(val) * self.MPS_TO_KNOTS
+                                        updated = True
+                                
+                                # TWA: radians -> degrees (-180 to +180)
+                                elif path in ("environment.wind.angleTrueWater", "environment.wind.angleTrueGround"):
+                                    if isinstance(val, (int, float)):
+                                        deg = math.degrees(float(val))
+                                        # Normalize to -180 to +180
+                                        while deg > 180:
+                                            deg -= 360
+                                        while deg <= -180:
+                                            deg += 360
+                                        self._twa = deg
+                                        updated = True
+                                
+                                # TWD: radians -> degrees (0 to 360)
+                                elif path == "environment.wind.directionTrue":
+                                    if isinstance(val, (int, float)):
+                                        self._twd = (math.degrees(float(val))) % 360
+                                        updated = True
                 
+                # If TWD is not provided directly by the server, calculate it from COG or Heading + TWA
+                if math.isnan(self._twd) and not math.isnan(self._twa):
+                    ref_angle = self._heading_true if not math.isnan(self._heading_true) else self._cog
+                    if not math.isnan(ref_angle):
+                        self._twd = (ref_angle + self._twa) % 360
+
+                if updated:
+                    self._last_update_time = now
+
         except Exception as e:
             print(f"**ERR SIGNALK: Error processing message: {e}")
-    
+
     def _on_error(self, ws, error):
         """Handle WebSocket errors"""
-        print(f"**ERR SIGNALK: WebSocket error: {error}")
-    
+        if self._running:
+            print(f"**ERR SIGNALK: WebSocket error: {error}")
+
     def _on_close(self, ws, close_status_code, close_msg):
         """Handle WebSocket connection closing"""
-        print(f"**INF SIGNALK: WebSocket connection closed: {close_msg} (code: {close_status_code})")
-    
-    def _print_info(self):
+        if self._running:
+            print(f"**INF SIGNALK: WebSocket connection closed: {close_msg} (code: {close_status_code})")
+
+    def get_latest_data(self) -> dict:
         """
-        Prints an informational message with system time, navigation status,
-        satellite count, accuracy, position, and wind data.
-        """
-        now = time.strftime("%H:%M:%S")
-        
-        with self._lock:
-            if self._fix_mode >= 2 and self._lat is not None and self._lon is not None:
-                status = "2D" if self._fix_mode == 2 else "3D" if self._fix_mode == 3 else str(self._fix_mode)
-                pos_lat = self._format_position(self._lat)
-                pos_lon = self._format_position(self._lon)
-                pos_str = f"{pos_lat}, {pos_lon}"
-                acc_str = f"{self._accuracy:.2f}" if self._accuracy is not None else "---"
-                sats_str = str(self._satellites_count) if self._satellites_count is not None else "---"
-            else:
-                status = "---"
-                sats_str = "---"
-                acc_str = "---"
-                pos_str = "---"
-            
-            # Format wind data
-            tws_str = f"{self._tws:.2f}" if not math.isnan(self._tws) else "---"
-            twa_str = f"{self._twa:.1f}" if not math.isnan(self._twa) else "---"
-            twd_str = f"{self._twd:.1f}" if not math.isnan(self._twd) else "---"
-        
-        print(f"{now} **INF: Status: {status}, Satellites: {sats_str}, Accuracy: {acc_str}, Position: {pos_str}")
-        print(f"{now} **INF: Wind - TWS: {tws_str}kt, TWA: {twa_str}°, TWD: {twd_str}°")
-    
-    @staticmethod
-    def _format_position(coord):
-        """
-        Converts a decimal degree coordinate into 'DDD MM.MMM' format.
-        For example: 52.123456 becomes '052 07.407'.
-        """
-        abs_coord = abs(coord)
-        degrees = int(abs_coord)
-        minutes = (abs_coord - degrees) * 60
-        return f"{degrees:03d} {minutes:06.3f}"
-    
-    def read_gps_speed(self):
-        """
-        Returns a tuple (success, speed):
-         - success: True if a valid speed has been received.
-         - speed: the most recent speed in knots, or math.nan if not available.
+        Returns a dictionary of all current data (matches UDPNetworkReader interface).
         """
         with self._lock:
-            speed = self._latest_speed
-        return (False, speed) if math.isnan(speed) else (True, speed)
-    
-    def read_wind_data(self):
+            return {
+                'sog_knots': self._latest_speed,
+                'lat': self._lat,
+                'lon': self._lon,
+                'cog_degrees': self._cog,
+                'fix_mode': self._fix_mode,
+                'accuracy': self._accuracy,
+                'satellites_count': self._satellites_count,
+                'tws_knots': self._tws,
+                'twa_degrees': self._twa,
+                'twd_degrees': self._twd,
+                'last_update_time': self._last_update_time
+            }
+
+    def get_sog_knots(self) -> tuple[bool, float]:
         """
-        Returns a tuple (success, tws, twa, twd):
-         - success: True if valid wind data has been received.
-         - tws: True Wind Speed in knots, or math.nan if not available.
-         - twa: True Wind Angle in degrees, or math.nan if not available.
-         - twd: True Wind Direction in degrees, or math.nan if not available.
+        Returns (success, speed_in_knots).
+        Matches UDPNetworkReader interface.
+        """
+        with self._lock:
+            sog = self._latest_speed
+            valid = not math.isnan(sog) and (self._fix_mode > 0 or not math.isnan(sog))
+        return valid, sog if valid else math.nan
+
+    def get_true_wind(self) -> tuple[bool, float, float, float]:
+        """
+        Returns (success, tws_knots, twd_degrees, twa_degrees).
+        Matches UDPNetworkReader interface.
+        """
+        with self._lock:
+            tws = self._tws
+            twd = self._twd
+            twa = self._twa
+        valid = not math.isnan(tws) and not math.isnan(twa)
+        return (valid,
+                tws if valid else math.nan,
+                twd if not math.isnan(twd) else math.nan,
+                twa if valid else math.nan)
+
+    def read_gps_speed(self) -> tuple[bool, float]:
+        """
+        Legacy method for GPSSpeedReader compatibility.
+        Returns (success, speed_in_knots).
+        """
+        return self.get_sog_knots()
+
+    def read_wind_data(self) -> tuple[bool, float, float, float]:
+        """
+        Legacy method returning (success, tws, twa, twd).
         """
         with self._lock:
             tws = self._tws
             twa = self._twa
             twd = self._twd
-        
-        # Return success if at least wind speed and either angle or direction is available
-        success = (not math.isnan(tws)) and (not math.isnan(twa) or not math.isnan(twd))
-        return (success, tws, twa, twd)
-    
+        valid = not math.isnan(tws) and not math.isnan(twa)
+        return (valid, tws, twa, twd)
+
     def close(self):
         """
-        Stops the WebSocket connection and background thread.
+        Stops the WebSocket connection and background thread cleanly.
         """
         self._running = False
         if self.ws:
-            self.ws.close()
-        if hasattr(self, '_thread'):
-            self._thread.join()
+            try:
+                self.ws.close()
+            except Exception:
+                pass
+        if hasattr(self, '_thread') and self._thread.is_alive():
+            self._thread.join(timeout=2.0)
+        print("**INF SIGNALK: Signal K reader closed.")
 
-'''
-# Example usage:
+
 if __name__ == "__main__":
     signalk_reader = SignalKReader()
     try:
+        print("Listening for Signal K data (Ctrl+C to stop)...")
         while True:
-            time.sleep(5)
-            success, speed = signalk_reader.read_gps_speed()
-            wind_success, tws, twa, twd = signalk_reader.read_wind_data()
+            time.sleep(2)
+            sog_ok, sog = signalk_reader.get_sog_knots()
+            wind_ok, tws, twd, twa = signalk_reader.get_true_wind()
             
-            if success:
-                print(f"Current speed: {speed:.2f} knots")
-            else:
-                print("No valid speed reading yet.")
-                
-            if wind_success:
-                print(f"Wind data - TWS: {tws:.2f}kt, TWA: {twa:.1f}°, TWD: {twd:.1f}°")
-            else:
-                print("No valid wind data yet.")
-                
+            sog_str = f"{sog:.2f} kn" if sog_ok else "---"
+            wind_str = f"TWS {tws:.1f} kn, TWA {twa:.1f}°, TWD {twd:.1f}°" if wind_ok else "---"
+            print(f"[SignalK] SOG: {sog_str} | Wind: {wind_str}")
+            
     except KeyboardInterrupt:
         print("Exiting...")
     finally:
         signalk_reader.close()
-
-'''
